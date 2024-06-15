@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import torch 
 import torch.nn as nn
-from torch import functional as F
+from torch.nn import functional as F
 import math
 
 class CausalSelfAttention(nn.Module):
@@ -93,6 +93,20 @@ class GPT(nn.Module):
         # TODO: why bias false?
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
+    def forward(self, idx):
+        B, T = idx.size()
+        assert T <= self.config.block_size, "Cannot forward, model block size is exhausted."
+        pos = torch.arange(0, T, dtype=torch.long, device=idx.device) # shape = (T)
+        # can also do self.transformer.wpe(pos)
+        pos_emb = self.transformer['wpe'](pos) # shape = (T, n_embd)
+        tok_emb = self.transformer['wte'](idx) # shape = (B, T, n_embd)
+        x = tok_emb + pos_emb # shape = (B, T, n_embd)
+        for block in self.transformer['h']:
+            x = block(x)
+        x = self.transformer['ln_f'](x)
+        logits = self.lm_head(x) # shape = (B, T, vocab_size)
+        return logits
+
     # copy pasted
     @classmethod
     def from_pretrained(cls, model_type):
@@ -142,7 +156,39 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
-    
+
+# ----------------------------
+num_return_sequences = 5
+max_length = 30
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 model = GPT.from_pretrained('gpt2')
-print(model)
-print("done")
+model.eval()
+model.to(device)
+
+# prefix tokens
+import tiktoken
+enc = tiktoken.get_encoding('gpt2')
+tokens = enc.encode("Hello, I'm a language model,")
+tokens = torch.tensor(tokens, dtype=torch.long) # (8,)
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) # (5, 8)
+x = tokens.to(device)
+
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
+while x.size(1) < max_length:
+    with torch.no_grad():
+        logits = model(x) # B, T, vocab size
+        # take the logits at the last position
+        logits = logits[:, -1, :]
+        probs = F.softmax(logits, dim=-1)
+        # do top-k sampling of 50
+        # topk_probs shape = (B, 50), topk_indicies shape = (B, 50)
+        topk_probs, topk_indicies = torch.topk(probs, 50, dim=-1)
+        ix = torch.multinomial(topk_probs, num_samples=1) # shape = (B, 1)
+        xcol = torch.gather(topk_indicies, -1, ix) # shape = (B, 1)
+        x = torch.cat((x, xcol), dim=1)
+
+for i in range(num_return_sequences):
+    tokens = x[i, :max_length].tolist()
+    decoded = enc.decode(tokens)
+    print(">", decoded)

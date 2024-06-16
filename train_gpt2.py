@@ -229,6 +229,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
 train_loader = DataLoaderLite(B=16, T=1024)
+torch.set_float32_matmul_precision("high")
 
 model = GPT(GPTConfig())
 model.to(device)
@@ -245,7 +246,8 @@ for i in range(50):
         torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1 - t0)*1000
-    print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms")
+    tokens_per_sec = (train_loader.B * train_loader.T) / (t1-t0)
+    print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms {tokens_per_sec=}")
 import sys; sys.exit(0)
 
 ### temp code above

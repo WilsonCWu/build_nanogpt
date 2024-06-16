@@ -241,7 +241,8 @@ for i in range(50):
     logits, loss = model(x, y)
     loss.backward()
     optimizer.step()
-    torch.cuda.synchronize()
+    if device == "cuda":
+        torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1 - t0)*1000
     print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms")

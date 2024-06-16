@@ -29,12 +29,16 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # shape = (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # shape = (B, nh, T, hs)
         # attention. This impl materializes the large (T,T) matrix for all keys and queries
-        att = (q @ k.transpose(-2, -1)) * (1.0/math.sqrt(k.size(-1))) # shape = (B, nh, T, T)
-        # mask out the lower half of the matrix, dont see the future
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf')) 
-        # normalize
-        att = F.softmax(att, dim=-1)
-        y = att @ v # shape = (B, nh, T, T) x (B, nh, T, hs) = (B, nh, T, hs)
+        
+
+        # att = (q @ k.transpose(-2, -1)) * (1.0/math.sqrt(k.size(-1))) # shape = (B, nh, T, T)
+        # # mask out the lower half of the matrix, dont see the future
+        # att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf')) 
+        # # normalize
+        # att = F.softmax(att, dim=-1)
+        # y = att @ v # shape = (B, nh, T, T) x (B, nh, T, hs) = (B, nh, T, hs)
+        y = F.scaled_dot_product_attention(q,k,v, is_causal=True)
+
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         y = self.c_proj(y)
         return y
@@ -146,6 +150,7 @@ class GPT(nn.Module):
             'gpt2':         dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
             'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 350M params
             'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
+            # NOTE: 25 is not a computationally performant number
             'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
         }[model_type]
         config_args['vocab_size'] = 50257 # always 50257 for GPT model checkpoints
@@ -231,11 +236,19 @@ train_loader = DataLoaderLite(B=16, T=1024)
 # uses tfloat32 instead of float32 for matmuls, which is faster
 torch.set_float32_matmul_precision("high")
 
-model = GPT(GPTConfig())
+# much nicer number, divisible by 128
+# these extra tokens will never be used, encoder would never select these tokens
+# (technically used a little since wte and lm_head share weights, but it'll learn to ignore them)
+# even though we're increasing vocab size, this is actually more performant!
+# there are some boundary kernels that handle the remaining tokens after processing the nice powers of 2.
+# making this a nicer number means that those boundary kernels aren't needed
+model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)
 # speedup by compiling the model. docs say it mostly comes from reducing python overhead
 # and GPU read/writes
 # if you dont compile, the default mode is "eager mode"
+# kernel fusion: combines multiple operations into a single kernel, so that it doesn't need to
+# make intermediate trips to gpu memory
 model = torch.compile(model)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -254,7 +267,7 @@ for i in range(50):
     t1 = time.time()
     dt = (t1 - t0)*1000
     tokens_per_sec = (train_loader.B * train_loader.T) / (t1-t0)
-    print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms {tokens_per_sec=}")
+    print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
 import sys; sys.exit(0)
 
 ### temp code above

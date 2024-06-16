@@ -270,6 +270,7 @@ def get_lr(it):
     return min_lr + coef * (max_lr - min_lr)
 
 # gpt3 settings
+# JANK: note that lr=3e-4 isnt actually used, it's set below with get_lr
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
 for step in range(max_steps):
     t0 = time.time()
@@ -295,7 +296,7 @@ for step in range(max_steps):
     t1 = time.time()
     dt = (t1 - t0)*1000
     tokens_per_sec = (train_loader.B * train_loader.T) / (t1-t0)
-    print(f"step {step}, loss: {loss.item()}, {norm=:.4f} time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
+    print(f"step {step}, loss: {loss.item()}, {lr=} {norm=:.4f} time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
 import sys; sys.exit(0)
 
 ### temp code above

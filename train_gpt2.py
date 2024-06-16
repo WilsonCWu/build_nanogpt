@@ -316,13 +316,13 @@ else:
         device = "mps"
     print(f"using device: {device}")
 
-
+device_type = "cuda" if device.startswith("cuda") else "cpu"
 torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
 total_batch_size = 2**19 # 524288 tokens
-B = 32 # microbatch size
+B = 16 # microbatch size
 T = 1024 # seq len
 assert total_batch_size % (B*T*ddp_world_size) == 0
 # we need to gradient accumulate because we want total_batch_size, but that doesnt fit in mem
@@ -348,7 +348,7 @@ model.to(device)
 # if you dont compile, the default mode is "eager mode"
 # kernel fusion: combines multiple operations into a single kernel, so that it doesn't need to
 # make intermediate trips to gpu memory
-use_compile = True # TODO: apparently doesn't work for eval? i didnt get error yet, maybe pytorch version or no DDP
+use_compile = False # TODO: apparently doesn't work for eval? i didnt get error yet, maybe pytorch version or no DDP
 if use_compile:
     model = torch.compile(model)
 print(f"model compiled: {use_compile}")
@@ -377,7 +377,7 @@ def get_lr(it):
     return min_lr + coef * (max_lr - min_lr)
 
 # gpt3 settings
-optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=max_lr, device_type=device)
+optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=max_lr, device_type=device_type)
 
 # log dir for writing checkpoints and logs
 log_dir = "log"
@@ -402,7 +402,7 @@ for step in range(max_steps):
             for _ in range(val_loss_steps):
                 x, y = val_loader.next_batch()
                 x, y = x.to(device), y.to(device)
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                     logits, loss = model(x, y)
                 loss = loss / val_loss_steps
                 val_loss_accum += loss.detach()
@@ -440,7 +440,7 @@ for step in range(max_steps):
             mask = mask.to(device)
             # get the logits
             with torch.no_grad():
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                     logits, loss = model(tokens)
                 pred_norm = get_most_likely_row(tokens, mask, logits)
             num_total += 1
@@ -473,7 +473,7 @@ for step in range(max_steps):
 
         while xgen.size(1) < max_length:
             with torch.no_grad():
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                     logits, _ = model(xgen) # B, T, vocab size
                 # take the logits at the last position
                 logits = logits[:, -1, :]
@@ -481,7 +481,7 @@ for step in range(max_steps):
                 # do top-k sampling of 50
                 # topk_probs shape = (B, 50), topk_indicies shape = (B, 50)
                 topk_probs, topk_indicies = torch.topk(probs, 50, dim=-1)
-                ix = torch.multinomial(topk_probs, num_samples=1) # shape = (B, 1)
+                ix = torch.multinomial(topk_probs, num_samples=1, generator=sample_rng) # shape = (B, 1)
                 xcol = torch.gather(topk_indicies, -1, ix) # shape = (B, 1)
                 xgen = torch.cat((xgen, xcol), dim=1)
 
@@ -498,7 +498,7 @@ for step in range(max_steps):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
         # bfloat16 is even faster - 8 bit for exp, 7 bit for mantissa
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
             logits, loss = model(x, y)
         # need to average loss over all microbatches
         loss /= grad_accum_steps

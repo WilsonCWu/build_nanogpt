@@ -258,7 +258,15 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-train_loader = DataLoaderLite(B=16, T=1024)
+total_batch_size = 2**19 # 524288 tokens
+B = 32 # microbatch size
+T = 1024 # seq len
+assert total_batch_size % (B*T) == 0
+# we need to gradient accumulate because we want total_batch_size, but that doesnt fit in mem
+grad_accum_steps = total_batch_size // (B*T)
+print(f"total batch size: {total_batch_size}, grad_accum_steps: {grad_accum_steps}")
+
+train_loader = DataLoaderLite(B=B, T=T)
 # uses tfloat32 instead of float32 for matmuls, which is faster
 torch.set_float32_matmul_precision("high")
 
@@ -299,13 +307,18 @@ def get_lr(it):
 optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=max_lr, device_type=device)
 for step in range(max_steps):
     t0 = time.time()
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    # bfloat16 is even faster - 8 bit for exp, 7 bit for mantissa
-    with torch.autocast(device_type=device, dtype=torch.bfloat16):
-        logits, loss = model(x, y)
-    loss.backward()
+    loss_accum = 0.0
+    for micro_step in range(grad_accum_steps):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        # bfloat16 is even faster - 8 bit for exp, 7 bit for mantissa
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x, y)
+        # need to average loss over all microbatches
+        loss /= grad_accum_steps
+        loss_accum += loss.detach()
+        loss.backward()
     # clip global norm of gradient at 1
     # modifies inplace
     # people like this because it prevents 1 bad batch from affecting the model too much
@@ -319,9 +332,9 @@ for step in range(max_steps):
     if device == "cuda":
         torch.cuda.synchronize()
     t1 = time.time()
-    dt = (t1 - t0)*1000
-    tokens_per_sec = (train_loader.B * train_loader.T) / (t1-t0)
-    print(f"step {step}, loss: {loss.item():.5f}, {lr=:.4e} {norm=:.4f} time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
+    dt = (t1 - t0)
+    tokens_per_sec = (train_loader.B * train_loader.T * grad_accum_steps) / dt
+    print(f"step {step}, loss: {loss_accum:.5f}, {lr=:.4e} {norm=:.4f} time: {dt*1000:.2f}ms {tokens_per_sec=:,.0f}")
 import sys; sys.exit(0)
 
 ### temp code above

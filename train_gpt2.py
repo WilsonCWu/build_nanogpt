@@ -296,7 +296,7 @@ for step in range(max_steps):
     t1 = time.time()
     dt = (t1 - t0)*1000
     tokens_per_sec = (train_loader.B * train_loader.T) / (t1-t0)
-    print(f"step {step}, loss: {loss.item()}, {lr=} {norm=:.4f} time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
+    print(f"step {step}, loss: {loss.item():.5f}, {lr=:.4e} {norm=:.4f} time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
 import sys; sys.exit(0)
 
 ### temp code above

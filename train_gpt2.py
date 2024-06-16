@@ -93,7 +93,7 @@ class GPT(nn.Module):
         # TODO: why bias false?
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-    def forward(self, idx):
+    def forward(self, idx, targets=None):
         B, T = idx.size()
         assert T <= self.config.block_size, "Cannot forward, model block size is exhausted."
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device) # shape = (T)
@@ -105,7 +105,10 @@ class GPT(nn.Module):
             x = block(x)
         x = self.transformer['ln_f'](x)
         logits = self.lm_head(x) # shape = (B, T, vocab_size)
-        return logits
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
 
     # copy pasted
     @classmethod
@@ -160,8 +163,40 @@ class GPT(nn.Module):
 # ----------------------------
 num_return_sequences = 5
 max_length = 30
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model = GPT.from_pretrained('gpt2')
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    device = "mps"
+print(f"using device: {device}")
+
+
+import tiktoken
+enc = tiktoken.get_encoding('gpt2')
+with open("input.txt", "r") as f:
+    text = f.read()
+text = text[:1000]
+tokens = enc.encode(text)
+B, T = 4, 32
+buf = torch.tensor(tokens[:B*T+1])
+x = buf[:-1].view(B, T)
+y = buf[1:].view(B, T)
+
+model = GPT(GPTConfig())
+model.to(device)
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+for i in range(50):
+    optimizer.zero_grad()
+    logits, loss = model(x.to(device), y.to(device))
+    loss.backward()
+    optimizer.step()
+    print(i, loss.item())
+import sys; sys.exit(0)
+
+### temp code above
+
+#model = GPT.from_pretrained('gpt2')
+model = GPT(GPTConfig())
 model.eval()
 model.to(device)
 

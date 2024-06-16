@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import math
-
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -229,17 +228,25 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
 train_loader = DataLoaderLite(B=16, T=1024)
+# uses tfloat32 instead of float32 for matmuls, which is faster
 torch.set_float32_matmul_precision("high")
 
 model = GPT(GPTConfig())
 model.to(device)
+# speedup by compiling the model. docs say it mostly comes from reducing python overhead
+# and GPU read/writes
+# if you dont compile, the default mode is "eager mode"
+model = torch.compile(model)
+
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for i in range(50):
     t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    logits, loss = model(x, y)
+    # bfloat16 is even faster - 8 bit for exp, 7 bit for mantissa
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        logits, loss = model(x, y)
     loss.backward()
     optimizer.step()
     if device == "cuda":

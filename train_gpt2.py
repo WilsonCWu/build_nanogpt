@@ -360,7 +360,8 @@ max_lr = 6e-4
 min_lr = max_lr*0.1
 # andrej: this can probably be lowered all the way to 100
 warmup_steps = 715 # 375e6 / 2**9 steps. 375M tokens, 2**9 tokens per step
-max_steps = 19073 # 10e9/2**19 steps. 10B tokens, 2**19 tokens per step
+# multiplier to try and hit gpt3 level performance
+max_steps = 19073 * 5 # 10e9/2**19 steps. 10B tokens, 2**19 tokens per step
 
 def get_lr(it):
     # linear warmup
@@ -411,6 +412,18 @@ for step in range(max_steps):
             print(f"validation loss: {val_loss_accum.item():.5f}")
             with open(log_file, "a") as f:
                 f.write(f"{step} val {val_loss_accum.item():.5f}\n")
+            if step > 0 and (step % 5000 == 0 or last_step):
+                # optionally write model checkpoints
+                checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
+                checkpoint = {
+                    'model': raw_model.state_dict(),
+                    'config': raw_model.config,
+                    'step': step,
+                    'val_loss': val_loss_accum.item()
+                }
+                # you might also want to add optimizer.state_dict() and
+                # rng seeds etc., if you wanted to more exactly resume training
+                torch.save(checkpoint, checkpoint_path)
     
     # copy pasted
     # once in a while evaluate hellaswag

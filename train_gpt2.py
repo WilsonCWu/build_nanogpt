@@ -251,8 +251,27 @@ model.to(device)
 # make intermediate trips to gpu memory
 model = torch.compile(model)
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-for i in range(50):
+max_lr = 6e-4
+min_lr = max_lr*0.1
+warmup_steps = 10
+max_steps = 50
+
+def get_lr(it):
+    # linear warmup
+    if it < warmup_steps:
+        return max_lr*(it+1) / warmup_steps
+    # done cosine decay, go to min
+    if it >= max_steps:
+        return min_lr
+    # cosine decay
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    assert 0 <= decay_ratio <= 1
+    coef = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # starts at 1 and goes to 0
+    return min_lr + coef * (max_lr - min_lr)
+
+# gpt3 settings
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+for step in range(max_steps):
     t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
@@ -261,13 +280,22 @@ for i in range(50):
     with torch.autocast(device_type=device, dtype=torch.bfloat16):
         logits, loss = model(x, y)
     loss.backward()
+    # clip global norm of gradient at 1
+    # modifies inplace
+    # people like this because it prevents 1 bad batch from affecting the model too much
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
     optimizer.step()
+
     if device == "cuda":
         torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1 - t0)*1000
     tokens_per_sec = (train_loader.B * train_loader.T) / (t1-t0)
-    print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
+    print(f"step {step}, loss: {loss.item()}, {norm=:.4f} time: {dt:.2f}ms {tokens_per_sec=:,.0f}")
 import sys; sys.exit(0)
 
 ### temp code above

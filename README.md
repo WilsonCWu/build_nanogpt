@@ -10,6 +10,7 @@ following along https://www.youtube.com/watch?v=l8pRSuU81PU
 
 
 # errors
+* accidentally borked log.txt :( a chunk of logs are missing, between 5-7k iters
 compile + eval erro
 ```
 

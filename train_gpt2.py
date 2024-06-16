@@ -93,6 +93,13 @@ class GPT(nn.Module):
         # TODO: why bias false?
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
+        # weight sharing scheme
+        # embeddings and softmax share the same weight matrix. 
+        # you want both of them to learn the same semantic similarities between diff tokens. 
+        # observed that tying them leads to better perf.
+        # also note that this matrix is massive, so reusing it is a huge memory saver
+        self.transformer['wte'].weight = self.lm_head.weight
+
     def forward(self, idx, targets=None):
         B, T = idx.size()
         assert T <= self.config.block_size, "Cannot forward, model block size is exhausted."

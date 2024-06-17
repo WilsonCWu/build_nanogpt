@@ -11,6 +11,7 @@ following along https://www.youtube.com/watch?v=l8pRSuU81PU
 
 # errors
 * aw man, i think there's a bug somewhere. loss is significantly worse than the video's results. see notebook.
+* edit ^ https://github.com/karpathy/build-nanogpt/pull/30 nice, looks like it's actually a bug in the original impl. i wouldn't doubt that i have more bugs on top of that though lol
 compile + eval erro
 ```
 

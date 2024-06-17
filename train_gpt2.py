@@ -148,7 +148,8 @@ if ddp:
 raw_model = model.module if ddp else model
 
 # andrej: *3, original gpt2 settings too cautious
-max_lr = 6e-4 * 3
+# *3 seemed a bit high, let's try *1.5
+max_lr = 6e-4 * 1.5
 min_lr = max_lr*0.1
 # andrej: this can probably be lowered all the way to 100
 warmup_steps = 715 # 375e6 / 2**9 steps. 375M tokens, 2**9 tokens per step

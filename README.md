@@ -10,6 +10,7 @@ following along https://www.youtube.com/watch?v=l8pRSuU81PU
 
 
 # errors
+* aw man, i think there's a bug somewhere. loss is significantly worse than the video's results. see notebook.
 compile + eval erro
 ```
 
